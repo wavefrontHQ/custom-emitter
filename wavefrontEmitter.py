@@ -9,7 +9,7 @@ custom_emitters: /path/to/wavefrontEmitter.py
 
 See the emitter documentation for additional optional settings.
 
-Version: 0.9.2
+Version: 0.9.3
 """
 
 import socket
@@ -103,7 +103,8 @@ class emitter(object):
         # pylint: disable=bare-except
         except:
             exc = sys.exc_info()
-            log.err('Unable to parse message: %s\n%s',
+            #log.err('Unable to parse message: %s\n%s',
+            log.exception('Unable to parse message: %s\n%s',
                     str(exc[1]), str(message))
 
         finally:
@@ -122,6 +123,7 @@ class emitter(object):
         metrics = message['series']
         for metric in metrics:
             name = metric['metric']
+            #name = 'dd.' +  metric['metric']
             jtags = metric['tags']
             tags = {}
             if jtags:
@@ -151,6 +153,7 @@ class emitter(object):
 
         tag_str = (emitter.build_tag_string(tags, skip_tag_key) +
                    emitter.build_tag_string(self.point_tags, skip_tag_key))
+        name = 'dd.' + name
         line = ('%s %s %d source="%s"%s' %
                 (name, value, long(tstamp), host_name, tag_str))
         if self.proxy_dry_run or not self.sock:
@@ -240,39 +243,54 @@ class emitter(object):
         message - a JSON object representing the message sent to datadoghq
         """
 
-        tstamp = long(message['collection_timestamp'])
-        host_name = message['internalHostname']
+	if 'collection_timestamp' in message:
+            tstamp = long(message['collection_timestamp'])
+        elif 'timestamp' in message:
+	    tstamp = long(message['timestamp'])
+        if 'internalHostname' in message:
+            host_name = message['internalHostname']
+        elif 'host_name' in message:
+	    host_name = message['host_name']
 
         # cpu* mem*
-        for key, value in message.iteritems():
-            if key[0:3] == 'cpu' or key[0:3] == 'mem':
-                dotted = 'system.' + emitter.convert_key_to_dotted_name(key)
-                self.send_metric(dotted, value, tstamp, host_name, None)
+        if isinstance(message[0],dict):
+            for key, value in message[0].iteritems():
+                #for key, value in message.iteritems():
+                if isinstance(key, str):
+                   if key[0:3] == 'cpu' or key[0:3] == 'mem':
+                      dotted = 'system.' + emitter.convert_key_to_dotted_name(key)
+                      self.send_metric(dotted, value, tstamp, host_name, None)
 
         # metrics
-        metrics = message['metrics']
-        for metric in metrics:
-            self.send_metric(
-                metric[0], metric[2], long(metric[1]), '=hostname', metric[3])
+        metrics = []
+        if 'metrics' in message:
+            metrics = message['metrics']
+            for metric in metrics:
+                self.send_metric(
+                    metric[0], metric[2], long(metric[1]), '=hostname', metric[3])
 
         # iostats
-        iostats = message['ioStats']
-        for disk_name, stats in iostats.iteritems():
-            for name, value in stats.iteritems():
-                name = (name.replace('%', '')
-                        .replace('/', '_'))
+        iostats = []
+        if 'ioStats' in message:
+            iostats = message['ioStats']
+            for disk_name, stats in iostats.iteritems():
+                for name, value in stats.iteritems():
+                    name = (name.replace('%', '')
+                            .replace('/', '_'))
 
-                metric_name = ('system.io.%s' % (name, ))
-                tags = {'disk': disk_name}
-                self.send_metric(metric_name, value, tstamp, host_name, tags)
+                    metric_name = ('system.io.%s' % (name, ))
+                    tags = {'disk': disk_name}
+                    self.send_metric(metric_name, value, tstamp, host_name, tags)
 
         # count processes
-        processes = message['processes']
-        # don't use this name since it differs from internalHostname on ec2
-        # host_name = processes['host']
         metric_name = 'system.processes.count'
-        value = len(processes['processes'])
-        self.send_metric(metric_name, value, tstamp, host_name, None)
+        if 'processes' in message:
+            processes = message['processes']
+            # don't use this name since it differs from internalHostname on ec2
+            # host_name = processes['host']
+            metric_name = 'system.processes.count'
+            value = len(processes['processes'])
+            self.send_metric(metric_name, value, tstamp, host_name, None)
 
         # system.load.*
         load_metric_names = ['system.load.1', 'system.load.15', 'system.load.5',
@@ -334,6 +352,7 @@ class emitter(object):
                 k = self.sanitize(parts[0])
                 v = self.sanitize(parts[1])
                 self.point_tags[k] = v
+
 
     @staticmethod
     def sanitize(s):
