@@ -1,3 +1,7 @@
+> **Warning**
+>
+> VMware has ended active development of this project. this repository will no longer be updated.
+
 # About
 
 This is a [custom emitter](https://github.com/DataDog/dd-agent/wiki/Using-custom-emitters) for the DataDog Agent forwarder which will send metrics from the DataDog Collector and DogStatsD to Wavefront via a [Proxy](https://github.com/wavefrontHQ/install)
